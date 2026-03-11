@@ -1,0 +1,62 @@
+{
+  "Picking_ID": {
+    "label": "Picking_ID",
+    "visible": true,
+    "order": 1
+  },
+  "Fecha": {
+    "label": "Fecha",
+    "visible": true,
+    "order": 2
+  },
+  "Hora_gen": {
+    "label": "Hora_gen",
+    "visible": true,
+    "order": 3
+  },
+  "Auxiliar": {
+    "label": "Auxiliar",
+    "visible": true,
+    "order": 4
+  },
+  "Marca": {
+    "label": "Marca",
+    "visible": true,
+    "order": 5
+  },
+  "Referencia": {
+    "label": "Referencia",
+    "visible": true,
+    "order": 6
+  },
+  "Pasillo": {
+    "label": "Pasillo",
+    "visible": true,
+    "order": 7
+  },
+  "Piso": {
+    "label": "Piso",
+    "visible": true,
+    "order": 8
+  },
+  "Cantidad": {
+    "label": "Cantidad",
+    "visible": true,
+    "order": 9
+  },
+  "Error": {
+    "label": "Error(%)",
+    "visible": true,
+    "order": 10
+  },
+  "modified_at": {
+    "label": "modified_at",
+    "visible": true,
+    "order": 11
+  },
+  "acciones": {
+    "label": "acciones",
+    "visible": true,
+    "order": 99
+  }
+}
