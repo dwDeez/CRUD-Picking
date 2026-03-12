@@ -9,7 +9,7 @@ import pandas as pd
 from werkzeug.utils import secure_filename
 
 from app import db
-from app.models import Picking, PickingItem
+from app.models import Picking, PickingItem, Mercancia, PickingCSV, PickingItemCSV, MercanciaCSV
 
 
 date_re = re.compile(r"^\d{4}-\d{2}-\d{2}$")
@@ -102,13 +102,17 @@ def import_csv_adaptive(csv_path: str) -> tuple[str, list, list, list]:
     error_count = 0
     
     try:
+        PickingCSV.query.delete()
+        PickingItemCSV.query.delete()
+        db.session.commit()
+        
         for _, r in df.iterrows():
             try:
                 pick_id = str(r.get(mapping.get("Picking_ID"), "")).strip()
                 if not pick_id:
                     continue
                 
-                p = Picking(
+                p = PickingCSV(
                     Picking_ID=pick_id,
                     Fecha=str(r.get(mapping.get("Fecha"), "")).strip() if mapping.get("Fecha") else "",
                     Hora_generacion=str(r.get(mapping.get("Hora_generacion"), "")).strip() if mapping.get("Hora_generacion") else "",
@@ -131,7 +135,7 @@ def import_csv_adaptive(csv_path: str) -> tuple[str, list, list, list]:
                 
                 if p.Marca_solicitada or p.Referencia_solicitada:
                     try:
-                        item = PickingItem(
+                        item = PickingItemCSV(
                             Picking_ID=pick_id,
                             tipo=p.Categoria_producto or "Item",
                             marca=p.Marca_solicitada,
@@ -154,7 +158,7 @@ def import_csv_adaptive(csv_path: str) -> tuple[str, list, list, list]:
         
         db.session.commit()
         
-        result_msg = f"Importación completada: {imported_count} filas importadas."
+        result_msg = f"Análisis CSV: {imported_count} filas importadas para análisis."
         if error_count > 0:
             result_msg += f" ({error_count} errores)"
         
@@ -208,15 +212,15 @@ def get_audit_user() -> str:
 
 def get_csv_path() -> Path:
     from flask import current_app
-    csv_file = current_app.config.get("CSV_FILE", "dataset_importadora_electrodomesticos_4000.csv")
+    csv_file = current_app.config.get("CSV_FILE", "datos.csv")
     base_dir = current_app.config.get("BASE_DIR", ".")
     return Path(base_dir) / csv_file
 
 
 def get_db_path() -> Path:
     from flask import current_app
-    db_file = current_app.config.get("DB_NAME", "dataset_importadora_electrodomesticos_4000.db")
-    base_dir = current_app.config.get("BASE_DIR", ".")
+    db_file = current_app.config.get("DB_NAME", "wms_data.db")
+    base_dir = current_app.config.get("DATA_DIR", ".")
     return Path(base_dir) / db_file
 
 
@@ -231,7 +235,7 @@ def backup_db() -> str | None:
     if os.path.exists(db_path):
         ensure_backup_dir()
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-        backup_dir = get_backup_dir()
+        backup_dir = Path(get_backup_dir())
         dest = backup_dir / f"db_backup_{ts}.db"
         shutil.copy2(db_path, dest)
         return str(dest)
@@ -243,7 +247,7 @@ def backup_csv() -> str | None:
     if os.path.exists(csv_path):
         ensure_backup_dir()
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-        backup_dir = get_backup_dir()
+        backup_dir = Path(get_backup_dir())
         dest = backup_dir / f"csv_backup_{ts}_{csv_path.name}"
         shutil.copy2(csv_path, dest)
         return str(dest)
@@ -310,7 +314,7 @@ def get_distinct_values_for_filters() -> dict:
             Picking.Pasillo, Picking.Piso, Picking.Categoria_producto
         ).all()
     except Exception:
-        return {k: [] for k in cols.keys()}
+        rows = []
     
     for pid, fecha, aux, marca, ref, pas, piso, cat in rows:
         if pid:
@@ -330,6 +334,23 @@ def get_distinct_values_for_filters() -> dict:
             cols["Piso"].add(piso)
         if cat:
             cols["Categoria"].add(cat)
+    
+    try:
+        mercancias = Mercancia.query.all()
+        for m in mercancias:
+            if m.marca:
+                cols["Marca"].add(m.marca)
+            if m.referencia:
+                cols["Referencia"].add(m.referencia)
+            if m.pasillo:
+                cols["Pasillo"].add(m.pasillo)
+            if m.piso:
+                cols["Piso"].add(m.piso)
+            if m.categoria_producto:
+                cols["Categoria"].add(m.categoria_producto)
+    except Exception:
+        pass
+    
     return {k: sorted(list(v)) for k, v in cols.items()}
 
 
@@ -445,3 +466,66 @@ def init_db_from_csv(csv_path: str = None) -> str:
             print("init_db_from_csv error:", e)
             return "Error importando CSV."
     return "CSV no encontrado o DB ya existe."
+
+
+def get_mercancia_disponible():
+    try:
+        mercancias = Mercancia.query.filter(Mercancia.cantidad > 0).all()
+        return [{
+            'id': m.id,
+            'marca': m.marca,
+            'referencia': m.referencia,
+            'cantidad': m.cantidad,
+            'categoria_producto': m.categoria_producto,
+            'pasillo': m.pasillo,
+            'estanteria': m.estanteria,
+            'piso': m.piso,
+            'fecha_ingreso': m.fecha_ingreso,
+            'hora_ingreso': m.hora_ingreso
+        } for m in mercancias]
+    except Exception as e:
+        print("Error get_mercancia_disponible:", e)
+        return []
+
+
+def get_mercancia_by_marca_ref(marca: str, referencia: str):
+    try:
+        return Mercancia.query.filter(
+            Mercancia.marca == marca,
+            Mercancia.referencia == referencia,
+            Mercancia.cantidad > 0
+        ).all()
+    except Exception as e:
+        print("Error get_mercancia_by_marca_ref:", e)
+        return []
+
+
+def descontar_mercancia(marca: str, referencia: str, cantidad: int) -> bool:
+    try:
+        mercancias = get_mercancia_by_marca_ref(marca, referencia)
+        remaining = cantidad
+        
+        for m in mercancias:
+            if remaining <= 0:
+                break
+            if m.cantidad >= remaining:
+                m.cantidad -= remaining
+                remaining = 0
+            else:
+                remaining -= m.cantidad
+                m.cantidad = 0
+        
+        db.session.commit()
+        return remaining == 0
+    except Exception as e:
+        db.session.rollback()
+        print("Error descontar_mercancia:", e)
+        return False
+
+
+def get_mercancia_by_sku(sku: str):
+    try:
+        return Mercancia.query.filter(Mercancia.sku == sku).first()
+    except Exception as e:
+        print("Error get_mercancia_by_sku:", e)
+        return None

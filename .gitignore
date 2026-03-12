@@ -29,7 +29,7 @@ dataset_importadora_electrodomesticos_4000.csv
 CRUD.py
 DASH.py
 DATA.py
-
+Sesion opencode.txt
 src/backups/
 src/*.db
 src/*.csv

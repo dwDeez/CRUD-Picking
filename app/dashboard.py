@@ -9,7 +9,7 @@ import dash_bootstrap_components as dbc
 import dash
 
 from app import db
-from app.models import Picking, PickingItem
+from app.models import Picking, PickingItem, Mercancia, PickingCSV, PickingItemCSV
 from app import create_app
 
 
@@ -138,8 +138,8 @@ def create_dashboard(server=None):
         dcc.Tabs(id='tabs', value='tab_general', children=[
             dcc.Tab(label='General', value='tab_general'),
             dcc.Tab(label='Ventas', value='tab_ventas'),
-            dcc.Tab(label='Errores', value='tab_errores'),
-            dcc.Tab(label='Ubicación en bodega', value='tab_ubicacion'),
+            dcc.Tab(label='Inventario', value='tab_inventario'),
+            dcc.Tab(label='Métricas', value='tab_ubicacion'),
             dcc.Tab(label='Auxiliares', value='tab_auxiliares'),
         ], persistence=True),
 
@@ -149,12 +149,15 @@ def create_dashboard(server=None):
                 dbc.Col(dcc.Graph(id='timeseries_sales'), id='col_ts_sales', className='col-md-6'),
             ], className='mb-3'),
             dbc.Row([
-                dbc.Col(dcc.Graph(id='hist_errors'), id='col_hist', className='col-md-6'),
+                dbc.Col(dcc.Graph(id='inventory_gauge'), id='col_inventory', className='col-md-6'),
                 dbc.Col(dcc.Graph(id='scatter_error_time'), id='col_scatter', className='col-md-6'),
             ], className='mb-3'),
             dbc.Row([
                 dbc.Col(dcc.Graph(id='heatmap_bodega'), id='col_heat', className='col-md-6'),
                 dbc.Col(dcc.Graph(id='aux_comparison'), id='col_aux', className='col-md-6'),
+            ], className='mb-3'),
+            dbc.Row([
+                dbc.Col(dcc.Graph(id='scatter_error_time_aux'), id='col_scatter_aux', className='col-md-12'),
             ], className='mb-3'),
             dbc.Row([
                 dbc.Col(
@@ -186,34 +189,36 @@ def create_dashboard(server=None):
     @app.callback(
         Output('col_top15', 'className'),
         Output('col_ts_sales', 'className'),
-        Output('col_hist', 'className'),
+        Output('col_inventory', 'className'),
         Output('col_scatter', 'className'),
         Output('col_heat', 'className'),
         Output('col_aux', 'className'),
+        Output('col_scatter_aux', 'className'),
         Output('col_pickings_dropdown', 'className'),
         Output('col_picking_detail', 'className'),
         Input('tabs', 'value')
     )
     def layout_by_tab(tab_value):
         if tab_value == 'tab_general':
-            return ('col-md-6','col-md-6','col-md-6','col-md-6','col-md-6','col-md-6','col-md-8','col-md-4')
+            return ('col-md-6','col-md-6','col-md-6','col-md-6','col-md-6','col-md-6','d-none','col-md-8','col-md-4')
         if tab_value == 'tab_ventas':
-            return ('col-12','col-12','d-none','d-none','d-none','d-none','col-12','col-12')
-        if tab_value == 'tab_errores':
-            return ('d-none','d-none','col-12','col-12','d-none','d-none','col-12','col-12')
+            return ('col-12','col-12','d-none','d-none','d-none','d-none','d-none','col-12','col-12')
+        if tab_value == 'tab_inventario':
+            return ('d-none','d-none','col-12','d-none','d-none','d-none','d-none','col-12','col-12')
         if tab_value == 'tab_ubicacion':
-            return ('d-none','d-none','d-none','d-none','col-12','d-none','col-12','col-12')
+            return ('d-none','d-none','d-none','d-none','col-12','d-none','d-none','col-12','col-12')
         if tab_value == 'tab_auxiliares':
-            return ('d-none','d-none','d-none','d-none','d-none','col-12','col-12','col-12')
-        return ('col-md-6','col-md-6','col-md-6','col-md-6','col-md-6','col-md-6','col-md-8','col-md-4')
+            return ('d-none','d-none','d-none','d-none','d-none','col-12','col-12','col-12','col-12')
+        return ('col-md-6','col-md-6','col-md-6','col-md-6','col-md-6','col-md-6','d-none','col-md-8','col-md-4')
 
     @app.callback(
         Output('top15_bar','figure'),
         Output('timeseries_sales','figure'),
-        Output('hist_errors','figure'),
+        Output('inventory_gauge','figure'),
         Output('scatter_error_time','figure'),
         Output('heatmap_bodega','figure'),
         Output('aux_comparison','figure'),
+        Output('scatter_error_time_aux','figure'),
         Output('picking_dropdown','options'),
         Output('picking_dropdown','value'),
         Output('marca_ref_dropdown','options'),
@@ -273,7 +278,7 @@ def create_dashboard(server=None):
             picking_options = []
             picking_value = None
             store_filtered = []
-            return empty_fig, empty_fig, empty_fig, empty_fig, empty_fig, empty_fig, picking_options, picking_value, options_mr, value_mr, diagnostic_text, store_filtered
+            return empty_fig, empty_fig, empty_figure("Cargando inventario..."), empty_fig, empty_fig, empty_fig, empty_fig, picking_options, picking_value, options_mr, value_mr, diagnostic_text, store_filtered
 
         top = (dff.groupby(['Marca_Referencia','Categoria_producto'], as_index=False)
                  .agg(Cantidad_total=('Cantidad','sum'),
@@ -289,8 +294,51 @@ def create_dashboard(server=None):
         fig_sales_ts.add_trace(go.Scatter(x=ts_sales['fecha_dia'], y=ts_sales['Cantidad_diaria'], name='Cantidad despachada diaria'))
         fig_sales_ts.update_layout(title='Evolución diaria: Cantidad despachada', xaxis_title='Fecha', yaxis_title='Cantidad', margin=dict(t=50))
 
-        fig_hist = px.histogram(dff, x='Error_porcentaje', nbins=30, title='Distribución de errores (%)', labels={'Error_porcentaje':'Error (%)'})
-        fig_hist.update_layout(margin=dict(t=40))
+        mercancias = Mercancia.query.filter(Mercancia.cantidad > 0).all()
+        total_unidades = sum(m.cantidad or 0 for m in mercancias)
+        total_productos = len(mercancias)
+        categorias_inv = {}
+        for m in mercancias:
+            cat = m.categoria_producto or "Sin categoría"
+            categorias_inv[cat] = categorias_inv.get(cat, 0) + (m.cantidad or 0)
+        
+        fig_inventory = make_subplots(
+            rows=1, cols=3,
+            specs=[[{"type": "indicator"}, {"type": "indicator"}, {"type": "pie"}]],
+            subplot_titles=["Total Unidades en Inventario", "SKUs Únicos", "Distribución por Categoría"]
+        )
+        
+        fig_inventory.add_trace(go.Indicator(
+            mode = "number+gauge",
+            value = total_unidades,
+            title = {"text": "Unidades"},
+            gauge = {
+                'axis': {'range': [0, max(total_unidades * 1.2, 100)]},
+                'bar': {'color': "steelblue"}
+            }
+        ), row=1, col=1)
+        
+        fig_inventory.add_trace(go.Indicator(
+            mode = "number",
+            value = total_productos,
+            title = {"text": "SKUs"}
+        ), row=1, col=2)
+        
+        if categorias_inv:
+            fig_inventory.add_trace(go.Pie(
+                labels=list(categorias_inv.keys()),
+                values=list(categorias_inv.values()),
+                textinfo='percent+label',
+                hole=0.3
+            ), row=1, col=3)
+        else:
+            fig_inventory.add_trace(go.Pie(
+                labels=["Sin datos"],
+                values=[1],
+                marker=dict(colors=["lightgray"])
+            ), row=1, col=3)
+        
+        fig_inventory.update_layout(height=400, margin=dict(t=50, b=40), template='plotly_white')
 
         fig_scatter = px.scatter(dff, x='tiempo_proceso', y='Error_porcentaje', color='Categoria_producto',
                                  hover_data=['Marca_Referencia','Cantidad','Auxiliar','Picking_ID'],
@@ -303,31 +351,59 @@ def create_dashboard(server=None):
                    .agg(Cantidad_total=('Cantidad','sum'),
                         Error_promedio=('Error_porcentaje','mean')))
         if group.empty:
-            fig_heat = empty_figure("No hay datos para el mapa de calor")
+            fig_heat = empty_figure("No hay datos para la métrica")
         else:
-            pasillos = sorted(group['Pasillo'].unique(), key=lambda x: str(x))
-            estanterias = sorted(group['Estanteria'].unique(), key=lambda x: str(x))
-            pisos = sorted(group['Piso'].unique(), key=lambda x: str(x))
-            cols = len(pisos)
-            fig_heat = make_subplots(rows=1, cols=cols, subplot_titles=[f"Piso={p}" for p in pisos], horizontal_spacing=0.04)
-            z_all = group.groupby(['Pasillo','Estanteria'])['Cantidad_total'].sum().values
-            zmin = float(np.nanpercentile(z_all, 2)) if len(z_all)>0 else 0.0
-            zmax = float(np.nanpercentile(z_all, 98)) if len(z_all)>0 else 1.0
-            if zmin == zmax:
-                zmin = 0.0
-                zmax = zmax if zmax != 0 else 1.0
-            for i, piso in enumerate(pisos, start=1):
-                sub = group[group['Piso'] == piso]
-                pivot_cant = sub.pivot_table(index='Estanteria', columns='Pasillo', values='Cantidad_total', aggfunc='sum', fill_value=0)
-                pivot_cant = pivot_cant.reindex(index=estanterias, columns=pasillos, fill_value=0)
-                z = pivot_cant.values
-                heat = go.Heatmap(z=z, x=list(pivot_cant.columns.astype(str)), y=list(pivot_cant.index.astype(str)),
-                                  colorscale='Viridis', zmin=zmin, zmax=zmax,
-                                  colorbar=dict(title='Cantidad', ticks="outside", tickformat=".0f"))
-                fig_heat.add_trace(heat, row=1, col=i)
-                fig_heat.update_xaxes(title_text="Pasillo", row=1, col=i, tickangle=-45)
-                fig_heat.update_yaxes(title_text="Estantería", row=1, col=i, autorange='reversed')
-            fig_heat.update_layout(title='Mapa de calor de la bodega', height=480, margin=dict(t=90, b=80), template='plotly_white')
+            error_promedio = dff['Error_porcentaje'].mean()
+            cantidad_total = dff['Cantidad'].sum()
+            pickings_count = dff['Picking_ID'].nunique()
+            
+            fig_heat = make_subplots(
+                rows=1, cols=3,
+                specs=[[{"type": "indicator"}, {"type": "indicator"}, {"type": "indicator"}]],
+                subplot_titles=["Error Promedio (%)", "Total Unidades", "Total Pickings"]
+            )
+            
+            fig_heat.add_trace(go.Indicator(
+                mode = "gauge+number",
+                value = error_promedio,
+                title = {"text": "Error %"},
+                gauge = {
+                    'axis': {'range': [0, 100]},
+                    'bar': {'color': "darkred" if error_promedio > 10 else "green"},
+                    'steps': [
+                        {'range': [0, 5], 'color': "lightgreen"},
+                        {'range': [5, 10], 'color': "yellow"},
+                        {'range': [10, 100], 'color': "lightcoral"}
+                    ],
+                    'threshold': {
+                        'line': {'color': "red", 'width': 2},
+                        'thickness': 0.75,
+                        'value': 10
+                    }
+                }
+            ), row=1, col=1)
+            
+            fig_heat.add_trace(go.Indicator(
+                mode = "number+gauge",
+                value = cantidad_total,
+                title = {"text": "Unidades"},
+                gauge = {
+                    'axis': {'range': [0, cantidad_total * 1.2]},
+                    'bar': {'color': "steelblue"}
+                }
+            ), row=1, col=2)
+            
+            fig_heat.add_trace(go.Indicator(
+                mode = "number+gauge",
+                value = pickings_count,
+                title = {"text": "Pickings"},
+                gauge = {
+                    'axis': {'range': [0, pickings_count * 1.2]},
+                    'bar': {'color': "purple"}
+                }
+            ), row=1, col=3)
+            
+            fig_heat.update_layout(height=400, margin=dict(t=90, b=40), template='plotly_white')
 
         visible_pickings = dff['Picking_ID'].dropna().astype(str).unique()
         picking_options = [{'label': pid, 'value': pid} for pid in sorted(visible_pickings)]
@@ -358,7 +434,7 @@ def create_dashboard(server=None):
         store_filtered["Picking_ID"] = store_filtered["Picking_ID"].astype(str)
         store_filtered = store_filtered.to_dict('records')
 
-        return fig_top, fig_sales_ts, fig_hist, fig_scatter, fig_heat, fig_aux, picking_options, picking_value, options_mr, value_mr, diagnostic_text, store_filtered
+        return fig_top, fig_sales_ts, fig_inventory, fig_scatter, fig_heat, fig_aux, fig_scatter, picking_options, picking_value, options_mr, value_mr, diagnostic_text, store_filtered
 
     @app.callback(
         Output('store_selected_picking','data'),

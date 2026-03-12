@@ -9,12 +9,13 @@ from flask import (
 from werkzeug.utils import secure_filename
 
 from app import db
-from app.models import Picking, PickingItem
+from app.models import Picking, PickingItem, Mercancia, PickingCSV, PickingItemCSV, MercanciaCSV
 from app.utils import (
     allowed_file, backup_csv, backup_db, build_pasillo_alfa_with_positions,
     get_distinct_item_types, get_distinct_values_for_filters, get_pasillo_for_item,
-    init_db_from_csv, validate_row_creation, validate_row_edit,
-    load_columns_config, save_columns_config, DEFAULT_COLUMNS, import_csv_adaptive
+    validate_row_creation, validate_row_edit,
+    load_columns_config, save_columns_config, DEFAULT_COLUMNS, import_csv_adaptive,
+    get_mercancia_disponible, get_mercancia_by_marca_ref, descontar_mercancia
 )
 from app.pdf_utils import generate_picking_pdf, generate_picking_list_pdf
 
@@ -29,6 +30,7 @@ BASE_HTML = """
 <h3>CRUD - Importadora Electrodomésticos</h3>
 <div class="mb-3 d-flex gap-2 flex-wrap">
     <a class="btn btn-primary" href="{{ url_for('create') }}">➕ Agregar nuevo</a>
+    <a class="btn btn-secondary" href="{{ url_for('agregar_mercancia') }}">📦 Agregar mercancía</a>
     <a class="btn btn-success" href="{{ url_for('export_csv') }}">📥 Exportar/Actualizar CSV</a>
     <a class="btn btn-info text-white" href="{{ url_for('upload_csv') }}">📤 Cargar CSV</a>
     <a class="btn btn-warning" href="#" data-bs-toggle="modal" data-bs-target="#columnsModal">⚙️ Columnas</a>
@@ -123,7 +125,7 @@ document.getElementById('saveColumnsBtn').addEventListener('click', function() {
 CREATE_FORM = """
 <form method="post" id="createForm">
 <div class="row">
-<div class="col-md-2 mb-2"><label>Tipo (filtrar)</label>
+<div class="col-md-3 mb-2"><label>Tipo (filtrar)</label>
 <select class="form-select" id="Tipo_selector" name="Tipo_selector">
 <option value="">-- todos --</option>
 {% for t in tipos %}<option value="{{ t }}">{{ t }}</option>{% endfor %}
@@ -135,26 +137,38 @@ CREATE_FORM = """
 {% for mr in marca_opts %}<option value="{{ mr }}">{{ mr }}</option>{% endfor %}
 </select>
 </div>
+<div class="col-md-5 mb-2"><label>Seleccionar del Inventario</label>
+<select class="form-select" id="mercancia_selector" name="mercancia_selector">
+<option value="">-- seleccionar mercancía --</option>
+{% for m in mercancia_opts %}<option value="{{ m.value }}">{{ m.label }}</option>{% endfor %}
+</select>
+</div>
+</div>
+<div class="row">
 <div class="col-md-2 mb-2"><label>Picking_ID</label><input class="form-control" name="Picking_ID" id="Picking_ID" readonly></div>
 <div class="col-md-2 mb-2"><label>Fecha</label><input class="form-control" type="date" name="Fecha" id="Fecha"></div>
 <div class="col-md-2 mb-2"><label>Hora generación</label><input class="form-control" type="time" step="1" name="Hora_generacion" id="Hora_generacion"></div>
-</div>
-<div class="row mt-2">
-<div class="col-md-3 mb-2"><label>Marca (manual)</label><input class="form-control" name="Marca_solicitada" id="Marca_solicitada"></div>
-<div class="col-md-3 mb-2"><label>Referencia (manual)</label><input class="form-control" name="Referencia_solicitada" id="Referencia_solicitada"></div>
-<div class="col-md-3 mb-2"><label>Auxiliar</label>
+<div class="col-md-2 mb-2"><label>Auxiliar</label>
 <select class="form-select" name="Auxiliar" id="Auxiliar">
 <option value="">-- seleccionar --</option>
 {% for a in aux_opts %}<option value="{{ a }}">{{ a }}</option>{% endfor %}
 </select>
 </div>
-<div class="col-md-3 mb-2"><label>Pasillo</label>
+<div class="col-md-2 mb-2"><label>Pasillo</label>
 <input class="form-control" name="Pasillo" id="Pasillo" list="pasillos_list">
 <datalist id="pasillos_list">{% for p in pas_opts %}<option value="{{ p }}">{% endfor %}</datalist>
 </div>
+<div class="col-md-2 mb-2"><label>Categoría</label>
+<input class="form-control" name="Categoria_producto" id="Categoria_producto" list="categorias_list">
+<datalist id="categorias_list">{% for c in cat_opts %}<option value="{{ c }}">{% endfor %}</datalist>
+</div>
+</div>
+<div class="row mt-2">
+<div class="col-md-3 mb-2"><label>Marca (manual)</label><input class="form-control" name="Marca_solicitada" id="Marca_solicitada"></div>
+<div class="col-md-3 mb-2"><label>Referencia (manual)</label><input class="form-control" name="Referencia_solicitada" id="Referencia_solicitada"></div>
 </div>
 <hr>
-<h5>Ítems del Picking (se rellenan automáticamente al seleccionar Marca | Referencia)</h5>
+<h5>Ítems del Picking (se rellenan automáticamente al seleccionar Marca | Referencia o Mercancía del Inventario)</h5>
 <div id="items_container"></div>
 <div class="mb-3">
 <button type="button" class="btn btn-sm btn-outline-secondary" id="add_item_btn">Agregar ítem</button>
@@ -364,6 +378,31 @@ if(document.getElementById('items_container').children.length === 0) addItemRow(
 }
 updateTotal();
 });
+const mercanciaSel = document.getElementById('mercancia_selector');
+if(mercanciaSel){
+mercanciaSel.addEventListener('change', function(){
+const mercanciaId = this.value;
+if(!mercanciaId) return;
+fetch('/buscar_mercancia_id/' + mercanciaId)
+.then(r => r.json())
+.then(data => {
+if(data && data.marca){
+const firstRow = document.querySelector('.item-row');
+if(firstRow && firstRow.dataset.locked === 'false'){
+firstRow.querySelector('input[name="item_marca[]"]').value = data.marca || '';
+firstRow.querySelector('input[name="item_referencia[]"]').value = data.referencia || '';
+firstRow.querySelector('input[name="item_cantidad[]"]').value = data.cantidad || 1;
+firstRow.querySelector('input[name="item_tipo[]"]').value = data.categoria || '';
+document.getElementById('Marca_solicitada').value = data.marca || '';
+document.getElementById('Referencia_solicitada').value = data.referencia || '';
+document.getElementById('Pasillo').value = data.pasillo || '';
+updateTotal();
+}
+}
+})
+.catch(err => console.log('Error mercancia:', err));
+});
+}
 </script>
 """
 
@@ -619,6 +658,21 @@ lengthMenu: [10,25,50,100]
         cat_opts = distincts["Categoria"]
         piso_opts = distincts["Piso"]
         tipos = get_distinct_item_types()
+        all_categories = sorted(set(list(cat_opts) + tipos))
+        
+        mercancia_opts = get_mercancia_disponible()
+        mercancia_select = []
+        for m in mercancia_opts:
+            ubicacion = ""
+            if m.get('pasillo'):
+                ubicacion = f"Pas: {m['pasillo']}"
+            if m.get('estanteria'):
+                ubicacion += f" Est: {m['estanteria']}"
+            if m.get('piso'):
+                ubicacion += f" Piso: {m['piso']}"
+            ubicacion = ubicacion.strip() or "Sin ubicación"
+            label = f"{m['marca']} | {m['referencia']} (Stock: {m['cantidad']}) - {ubicacion}"
+            mercancia_select.append({'label': label, 'value': str(m['id'])})
         
         if request.method == "POST":
             data = request.form.to_dict()
@@ -627,6 +681,8 @@ lengthMenu: [10,25,50,100]
                 parts = [p.strip() for p in marca_ref.split("|")]
                 data["Marca_solicitada"] = parts[0] if parts else ""
                 data["Referencia_solicitada"] = parts[1] if len(parts) > 1 else ""
+            
+            mercancia_seleccionada = data.get("mercancia_seleccionada")
             
             now_dt = datetime.now()
             data["Fecha"] = now_dt.strftime("%Y-%m-%d")
@@ -700,16 +756,253 @@ lengthMenu: [10,25,50,100]
                         )
                         db.session.add(item)
                         db.session.flush()
+                        
+                        descontar_mercancia(it["marca"], it["referencia"], it["cantidad"])
                     except Exception:
                         db.session.rollback()
             
             db.session.commit()
-            flash("Creado (Pasillo y Cantidad total calculados automáticamente).")
+            flash("Creado (Pasillo y Cantidad total calculados automáticamente). Mercanía descontada del inventario.")
             return redirect(url_for("index"))
         
-        body = render_template_string(CREATE_FORM, marca_opts=marca_opts, aux_opts=aux_opts, pas_opts=pas_opts, cat_opts=cat_opts, piso_opts=piso_opts, tipos=tipos)
+        body = render_template_string(CREATE_FORM, marca_opts=marca_opts, aux_opts=aux_opts, pas_opts=pas_opts, cat_opts=all_categories, piso_opts=piso_opts, tipos=tipos, mercancia_opts=mercancia_select)
         columns_config = load_columns_config()
         return render_template_string(BASE_HTML, body=body, columns_config=columns_config)
+
+    @app.route("/agregar_mercancia", methods=["GET", "POST"])
+    def agregar_mercancia():
+        distincts = get_distinct_values_for_filters()
+        marca_opts = distincts["Marca"]
+        
+        mercancia_marcas = sorted([m.marca for m in Mercancia.query.with_entities(Mercancia.marca).distinct().all() if m.marca])
+        marca_opts = sorted(set(list(marca_opts) + mercancia_marcas))
+        
+        pas_opts = distincts["Pasillo"]
+        mercancia_pasillos = sorted([m.pasillo for m in Mercancia.query.with_entities(Mercancia.pasillo).distinct().all() if m.pasillo])
+        pas_opts = sorted(set(list(pas_opts) + mercancia_pasillos))
+        
+        est_opts = sorted(set([p.Estanteria for p in Picking.query.with_entities(Picking.Estanteria).distinct().all() if p.Estanteria]))
+        mercancia_est = sorted([m.estanteria for m in Mercancia.query.with_entities(Mercancia.estanteria).distinct().all() if m.estanteria])
+        est_opts = sorted(set(list(est_opts) + mercancia_est))
+        
+        piso_opts = distincts["Piso"]
+        mercancia_pisos = sorted([m.piso for m in Mercancia.query.with_entities(Mercancia.piso).distinct().all() if m.piso])
+        piso_opts = sorted(set(list(piso_opts) + mercancia_pisos))
+        
+        cat_opts = distincts["Categoria"]
+        mercancia_cats = sorted([m.categoria_producto for m in Mercancia.query.with_entities(Mercancia.categoria_producto).distinct().all() if m.categoria_producto])
+        cat_opts = sorted(set(list(cat_opts) + mercancia_cats))
+        
+        tipos = get_distinct_item_types()
+        
+        all_categories = sorted(set(list(cat_opts) + tipos))
+        
+        if request.method == "POST":
+            data = request.form.to_dict()
+            
+            now_dt = datetime.now()
+            fecha_ingreso = now_dt.strftime("%Y-%m-%d")
+            hora_ingreso = now_dt.strftime("%H:%M:%S")
+            
+            try:
+                cantidad = int(data.get("Cantidad", 0))
+            except (ValueError, TypeError):
+                cantidad = 0
+            
+            if cantidad <= 0:
+                flash("La cantidad debe ser mayor a 0")
+                return redirect(url_for("agregar_mercancia"))
+            
+            pasillo = str(data.get("Pasillo", "")).strip()
+            estanteria = str(data.get("Estanteria", "")).strip()
+            piso = str(data.get("Piso", "")).strip()
+            marca = str(data.get("Marca_solicitada", "")).strip()
+            referencia = str(data.get("Referencia_solicitada", "")).strip()
+            sku = str(data.get("SKU", "")).strip()
+            
+            if not marca and not referencia and not sku:
+                flash("Debe agregar al menos un SKU, marca o referencia")
+                return redirect(url_for("agregar_mercancia"))
+            
+            audit_user = app.config.get("AUDIT_USER", "ui_user")
+            
+            categoria = str(data.get("Categoria_producto", "")).strip()
+            
+            marca_lower = marca.strip().lower() if marca else ""
+            referencia_lower = referencia.strip().lower() if referencia else ""
+            
+            if marca_lower and referencia_lower:
+                existing = Mercancia.query.filter(
+                    db.func.lower(Mercancia.marca) == marca_lower,
+                    db.func.lower(Mercancia.referencia) == referencia_lower
+                ).first()
+            else:
+                existing = None
+            
+            if existing:
+                existing.cantidad = (existing.cantidad or 0) + cantidad
+                if sku:
+                    existing.sku = sku
+                if categoria:
+                    existing.categoria_producto = categoria
+                if pasillo:
+                    existing.pasillo = pasillo
+                if estanteria:
+                    existing.estanteria = estanteria
+                if piso:
+                    existing.piso = piso
+                existing.modified_by = audit_user
+                existing.modified_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                msg = "Mercancía actualizada (sumada)."
+            else:
+                m = Mercancia(
+                    sku=sku,
+                    marca=marca,
+                    referencia=referencia,
+                    cantidad=cantidad,
+                    categoria_producto=categoria,
+                    pasillo=pasillo,
+                    estanteria=estanteria,
+                    piso=piso,
+                    fecha_ingreso=fecha_ingreso,
+                    hora_ingreso=hora_ingreso,
+                    modified_by=audit_user,
+                    modified_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                )
+                db.session.add(m)
+                msg = "Mercancía agregada correctamente."
+            
+            db.session.commit()
+            flash(msg)
+            return redirect(url_for("agregar_mercancia"))
+        
+        mercancia_form = """
+<form method="post">
+<div class="row">
+    <div class="col-md-6 mb-2">
+        <label>SKU (código único del producto)</label>
+        <input class="form-control" name="SKU" id="SKU" placeholder="Ingrese o escanee el SKU" autofocus>
+    </div>
+    <div class="col-md-3 mb-2">
+        <label>Categoría producto</label>
+        <input class="form-control" name="Categoria_producto" id="Categoria_producto" list="categorias_list">
+        <datalist id="categorias_list">
+        {% for c in all_categories %}<option value="{{ c }}">{% endfor %}
+        </datalist>
+    </div>
+    <div class="col-md-3 mb-2">
+        <label>Marca</label>
+        <input class="form-control" name="Marca_solicitada" id="Marca_solicitada" list="marcas_list">
+        <datalist id="marcas_list">
+        {% for m in marca_opts %}<option value="{{ m }}">{% endfor %}
+        </datalist>
+    </div>
+</div>
+<div class="row">
+    <div class="col-md-4 mb-2">
+        <label>Referencia</label>
+        <input class="form-control" name="Referencia_solicitada" id="Referencia_solicitada">
+    </div>
+    <div class="col-md-2 mb-2">
+        <label>Cantidad</label>
+        <input class="form-control" type="number" name="Cantidad" id="Cantidad" min="1" value="1" required>
+    </div>
+    <div class="col-md-2 mb-2">
+        <label>Pasillo</label>
+        <input class="form-control" name="Pasillo" id="Pasillo" list="pasillos_list">
+        <datalist id="pasillos_list">
+        {% for p in pas_opts %}<option value="{{ p }}">{% endfor %}
+        </datalist>
+    </div>
+    <div class="col-md-2 mb-2">
+        <label>Estantería</label>
+        <input class="form-control" name="Estanteria" id="Estanteria" list="estanterias_list">
+        <datalist id="estanterias_list">
+        {% for e in est_opts %}<option value="{{ e }}">{% endfor %}
+        </datalist>
+    </div>
+    <div class="col-md-2 mb-2">
+        <label>Piso</label>
+        <input class="form-control" name="Piso" id="Piso" list="pisos_list">
+        <datalist id="pisos_list">
+        {% for p in piso_opts %}<option value="{{ p }}">{% endfor %}
+        </datalist>
+    </div>
+</div>
+<div class="mt-3">
+    <button type="submit" class="btn btn-primary">Guardar</button>
+    <a class="btn btn-secondary" href="{{ url_for('index') }}">Cancelar</a>
+</div>
+</form>
+<script>
+document.getElementById('SKU').addEventListener('change', function() {
+    var sku = this.value.trim();
+    if(sku) {
+        fetch('/buscar_sku/' + encodeURIComponent(sku))
+            .then(response => response.json())
+            .then(data => {
+                if(data.encontrado) {
+                    document.getElementById('Marca_solicitada').value = data.marca || '';
+                    document.getElementById('Referencia_solicitada').value = data.referencia || '';
+                    document.getElementById('Categoria_producto').value = data.categoria || '';
+                }
+            })
+            .catch(err => console.error('Error buscando SKU:', err));
+    }
+});
+document.getElementById('SKU').addEventListener('keypress', function(e) {
+    if(e.key === 'Enter') {
+        e.preventDefault();
+        var sku = this.value.trim();
+        if(sku) {
+            fetch('/buscar_sku/' + encodeURIComponent(sku))
+                .then(response => response.json())
+                .then(data => {
+                    if(data.encontrado) {
+                        document.getElementById('Marca_solicitada').value = data.marca || '';
+                        document.getElementById('Referencia_solicitada').value = data.referencia || '';
+                        document.getElementById('Categoria_producto').value = data.categoria || '';
+                    }
+                });
+        }
+    }
+});
+</script>
+"""
+        body = render_template_string(mercancia_form, marca_opts=marca_opts, pas_opts=pas_opts, est_opts=est_opts, piso_opts=piso_opts, cat_opts=cat_opts, tipos=tipos, all_categories=all_categories)
+        columns_config = load_columns_config()
+        return render_template_string(BASE_HTML, body=body, columns_config=columns_config)
+
+    @app.route("/buscar_sku/<sku>")
+    def buscar_sku(sku):
+        mercancia = Mercancia.query.filter(Mercancia.sku == sku).first()
+        if mercancia:
+            return jsonify({
+                "encontrado": True,
+                "marca": mercancia.marca,
+                "referencia": mercancia.referencia,
+                "categoria": mercancia.categoria_producto,
+                "cantidad": mercancia.cantidad,
+                "pasillo": mercancia.pasillo,
+                "estanteria": mercancia.estanteria,
+                "piso": mercancia.piso
+            })
+        return jsonify({"encontrado": False})
+
+    @app.route("/buscar_mercancia_id/<int:mercancia_id>")
+    def buscar_mercancia_id(mercancia_id):
+        mercancia = Mercancia.query.get(mercancia_id)
+        if mercancia:
+            return jsonify({
+                "marca": mercancia.marca,
+                "referencia": mercancia.referencia,
+                "categoria": mercancia.categoria_producto,
+                "cantidad": mercancia.cantidad,
+                "pasillo": mercancia.pasillo,
+                "estanteria": mercancia.estanteria,
+                "piso": mercancia.piso
+            })
+        return jsonify({})
 
     @app.route("/edit/<pid>", methods=["GET", "POST"])
     def edit(pid):
@@ -858,11 +1151,8 @@ lengthMenu: [10,25,50,100]
                 file.save(upload_path)
                 
                 try:
-                    backup_db()
-                    backup_csv()
-                    
-                    PickingItem.query.delete()
-                    Picking.query.delete()
+                    PickingCSV.query.delete()
+                    PickingItemCSV.query.delete()
                     db.session.commit()
                     
                     msg, loaded, skipped, warnings = import_csv_adaptive(str(upload_path))

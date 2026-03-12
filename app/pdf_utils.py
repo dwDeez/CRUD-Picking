@@ -13,7 +13,7 @@ from reportlab.platypus import (
 from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
 
 from app import db
-from app.models import Picking, PickingItem
+from app.models import Picking, PickingItem, Mercancia
 
 
 def generate_picking_pdf(picking_id: str) -> bytes:
@@ -108,6 +108,12 @@ def generate_picking_pdf(picking_id: str) -> bytes:
     def get_item_location(marca: str, referencia: str):
         if not marca:
             return None, None, None
+        mercancia = Mercancia.query.filter(
+            Mercancia.marca == marca,
+            Mercancia.referencia == referencia
+        ).first()
+        if mercancia:
+            return mercancia.pasillo, mercancia.estanteria, mercancia.piso
         other = Picking.query.filter(
             Picking.Marca_solicitada == marca,
             Picking.Referencia_solicitada == referencia
@@ -278,6 +284,12 @@ def generate_picking_list_pdf(picking_ids: list = None) -> bytes:
     def get_item_location_for_list(marca: str, referencia: str):
         if not marca:
             return None, None, None
+        mercancia = Mercancia.query.filter(
+            Mercancia.marca == marca,
+            Mercancia.referencia == referencia
+        ).first()
+        if mercancia:
+            return mercancia.pasillo, mercancia.estanteria, mercancia.piso
         other = Picking.query.filter(
             Picking.Marca_solicitada == marca,
             Picking.Referencia_solicitada == referencia

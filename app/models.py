@@ -3,6 +3,24 @@ from app import db
 from sqlalchemy import UniqueConstraint
 
 
+class Mercancia(db.Model):
+    __tablename__ = "mercancia"
+
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    sku = db.Column(db.String)
+    marca = db.Column(db.String)
+    referencia = db.Column(db.String)
+    cantidad = db.Column(db.Integer, default=0)
+    categoria_producto = db.Column(db.String)
+    pasillo = db.Column(db.String)
+    estanteria = db.Column(db.String)
+    piso = db.Column(db.String)
+    fecha_ingreso = db.Column(db.String)
+    hora_ingreso = db.Column(db.String)
+    modified_by = db.Column(db.String)
+    modified_at = db.Column(db.String)
+
+
 class Picking(db.Model):
     __tablename__ = "pickings"
     __table_args__ = (
@@ -45,3 +63,67 @@ class PickingItem(db.Model):
     Estanteria = db.Column(db.String)
     Piso = db.Column(db.String)
     picking = db.relationship("Picking", back_populates="items")
+
+
+class PickingCSV(db.Model):
+    __tablename__ = "pickings_csv"
+    __table_args__ = (
+        UniqueConstraint('Picking_ID', name='uix_picking_csv'),
+    )
+
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    Picking_ID = db.Column(db.String)
+    Fecha = db.Column(db.String)
+    Hora_generacion = db.Column(db.String)
+    Hora_revision = db.Column(db.String)
+    Hora_despacho = db.Column(db.String)
+    Auxiliar = db.Column(db.String)
+    Cantidad_pickings_por_auxiliar = db.Column(db.Integer)
+    Pasillo = db.Column(db.String)
+    Estanteria = db.Column(db.String)
+    Piso = db.Column(db.String)
+    Marca_solicitada = db.Column(db.String)
+    Referencia_solicitada = db.Column(db.String)
+    Categoria_producto = db.Column(db.String)
+    Cantidad = db.Column(db.Integer)
+    Error_porcentaje = db.Column(db.Float)
+    modified_by = db.Column(db.String)
+    modified_at = db.Column(db.String)
+
+
+class PickingItemCSV(db.Model):
+    __tablename__ = "picking_items_csv"
+    __table_args__ = (
+        UniqueConstraint('Picking_ID', 'marca', 'referencia', 'tipo', 'cantidad', name='uix_picking_item_csv'),
+    )
+
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    Picking_ID = db.Column(db.String, index=True)
+    tipo = db.Column(db.String)
+    marca = db.Column(db.String)
+    referencia = db.Column(db.String)
+    cantidad = db.Column(db.Integer)
+    Pasillo = db.Column(db.String)
+    Estanteria = db.Column(db.String)
+    Piso = db.Column(db.String)
+
+
+class MercanciaCSV(db.Model):
+    __tablename__ = "mercancia_csv"
+    __table_args__ = (
+        UniqueConstraint('marca', 'referencia', 'pasillo', 'estanteria', 'piso', name='uix_mercancia_csv'),
+    )
+
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    sku = db.Column(db.String)
+    marca = db.Column(db.String)
+    referencia = db.Column(db.String)
+    cantidad = db.Column(db.Integer, default=0)
+    categoria_producto = db.Column(db.String)
+    pasillo = db.Column(db.String)
+    estanteria = db.Column(db.String)
+    piso = db.Column(db.String)
+    fecha_ingreso = db.Column(db.String)
+    hora_ingreso = db.Column(db.String)
+    modified_by = db.Column(db.String)
+    modified_at = db.Column(db.String)

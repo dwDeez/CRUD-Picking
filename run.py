@@ -2,23 +2,11 @@ import os
 from pathlib import Path
 
 from app import create_app, db
-from app.utils import init_db_from_csv
 from app.dashboard import create_dashboard
 
 app = create_app(os.environ.get("FLASK_ENV", "development"))
 
 if __name__ == "__main__":
-    with app.app_context():
-        try:
-            db.create_all()
-        except Exception as e:
-            print("Warning creating tables:", e)
-        try:
-            msg = init_db_from_csv()
-            print(msg)
-        except Exception as e:
-            print("Error inicializando DB:", e)
-    
     print("\n=== Instrucciones para ejecutar ===")
     print("1. Ejecutar Flask (CRUD): python run.py")
     print("2. Ejecutar Dashboard en otra terminal: python -m app.dashboard")
