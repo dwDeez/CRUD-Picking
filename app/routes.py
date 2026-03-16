@@ -264,20 +264,44 @@ if(marcaSel) {
     marcaSel.addEventListener('change', function(){
         const val = this.value;
         currentMarcaRef = val;
-        if(!val) return;
+        if(!val) {
+            document.getElementById('fifo_resultado').classList.add('d-none');
+            return;
+        }
         
         // Update marca and referencia fields
         const parts = val.split('|').map(s => s.trim());
         if(parts[0]) document.getElementById('Marca_solicitada').value = parts[0];
         if(parts[1]) document.getElementById('Referencia_solicitada').value = parts[1];
         
-        // Get FIFO positions
-        const cantidad = parseInt(document.getElementById('fifo_cantidad').value) || 1;
-        calcularFIFO(val, cantidad);
+        // Only show FIFO info, do NOT add items automatically
+        mostrarInfoFIFO(val);
     });
 }
 
-// Calcular FIFO button
+function mostrarInfoFIFO(marcaRef) {
+    if(!marcaRef) return;
+    
+    // Get FIFO info without adding items
+    fetch('/fifo_posiciones?marca_ref=' + encodeURIComponent(marcaRef) + '&cantidad=9999')
+    .then(r => r.json())
+    .then(j => {
+        if(j.ok) {
+            const resultDiv = document.getElementById('fifo_resultado');
+            let html = '<strong>Stock disponible: ' + j.total_disponible + '</strong><br>';
+            html += '<small>Posiciones disponibles (FIFO):</small><ul class="mb-0">';
+            j.posiciones.forEach(pos => {
+                html += '<li>' + pos.pasillo + '-' + pos.estanteria + '-' + pos.piso + ': <strong>' + pos.cantidad + '</strong> unidades (entró: ' + pos.fecha_ingreso + ')</li>';
+            });
+            html += '</ul>';
+            resultDiv.innerHTML = html;
+            resultDiv.classList.remove('d-none');
+        }
+    })
+    .catch(err => console.log('Error:', err));
+}
+
+// Calcular FIFO button - ONLY way to add items
 document.getElementById('calcular_fifo_btn').addEventListener('click', function(){
     if(!currentMarcaRef) {
         alert('Seleccione una Marca | Referencia primero');
@@ -308,7 +332,7 @@ function calcularFIFO(marcaRef, cantidad) {
             resultDiv.innerHTML = html;
             resultDiv.classList.remove('d-none');
             
-            // Add items with positions
+            // ONLY add items when clicking Calcular FIFO
             agregarItemsFIFO(j.posiciones_fifo);
         }
     })
