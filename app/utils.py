@@ -254,6 +254,52 @@ def backup_csv() -> str | None:
     return None
 
 
+def sync_to_pickings() -> str:
+    """Sincroniza datos desde PickingCSV hacia Picking"""
+    try:
+        csv_records = PickingCSV.query.all()
+        if not csv_records:
+            return "No hay datos en CSV para sincronizar"
+        
+        existing_ids = set(p.Picking_ID for p in Picking.query.all())
+        
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        audit_user = get_audit_user()
+        
+        synced = 0
+        for record in csv_records:
+            if record.Picking_ID in existing_ids:
+                continue
+            
+            picking = Picking(
+                Picking_ID=record.Picking_ID,
+                Fecha=record.Fecha or "",
+                Hora_generacion=record.Hora_generacion or "",
+                Hora_revision=record.Hora_revision or "",
+                Hora_despacho=record.Hora_despacho or "",
+                Auxiliar=record.Auxiliar or "",
+                Cantidad_pickings_por_auxiliar=record.Cantidad_pickings_por_auxiliar or 0,
+                Pasillo=record.Pasillo or "",
+                Estanteria=record.Estanteria or "",
+                Piso=record.Piso or "",
+                Marca_solicitada=record.Marca_solicitada or "",
+                Referencia_solicitada=record.Referencia_solicitada or "",
+                Categoria_producto=record.Categoria_producto or "",
+                Cantidad=record.Cantidad or 0,
+                Error_porcentaje=record.Error_porcentaje,
+                modified_by=audit_user,
+                modified_at=now
+            )
+            db.session.add(picking)
+            synced += 1
+        
+        db.session.commit()
+        return f"{synced} registros sincronizados a Picking"
+    except Exception as e:
+        db.session.rollback()
+        return f"Error sincronizando: {e}"
+
+
 def validate_row_creation(data: dict) -> tuple[bool, str]:
     if not data.get("Picking_ID"):
         return False, "Picking_ID obligatorio"

@@ -1,3 +1,4 @@
+
 from datetime import datetime
 from app import db
 from sqlalchemy import UniqueConstraint
@@ -41,6 +42,7 @@ class Picking(db.Model):
     Referencia_solicitada = db.Column(db.String)
     Categoria_producto = db.Column(db.String)
     Cantidad = db.Column(db.Integer)
+    Unidades_erradas = db.Column(db.Integer, default=0)
     Error_porcentaje = db.Column(db.Float)
     modified_by = db.Column(db.String)
     modified_at = db.Column(db.String)
@@ -127,3 +129,32 @@ class MercanciaCSV(db.Model):
     hora_ingreso = db.Column(db.String)
     modified_by = db.Column(db.String)
     modified_at = db.Column(db.String)
+
+
+class Recepcion(db.Model):
+    __tablename__ = "recepcion"
+
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    operario = db.Column(db.String)
+    fecha_inicio = db.Column(db.String)
+    fecha_fin = db.Column(db.String)
+    estado = db.Column(db.String, default="activa")
+    observaciones = db.Column(db.Text)
+    items = db.relationship("RecepcionItem", backref="recepcion", cascade="all, delete-orphan")
+
+
+class RecepcionItem(db.Model):
+    __tablename__ = "recepcion_item"
+
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    recepcion_id = db.Column(db.Integer, db.ForeignKey("recepcion.id"))
+    sku = db.Column(db.String)
+    marca = db.Column(db.String)
+    referencia = db.Column(db.String)
+    categoria = db.Column(db.String)
+    pasillo = db.Column(db.String)
+    estanteria = db.Column(db.String)
+    piso = db.Column(db.String)
+    unidad_numero = db.Column(db.Integer)
+    timestamp = db.Column(db.String)
+    confirmado = db.Column(db.Boolean, default=False)

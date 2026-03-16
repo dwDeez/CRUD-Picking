@@ -7,6 +7,7 @@ DATA_DIR = BASE_DIR / "Data"
 
 DATA_DIR.mkdir(exist_ok=True)
 (DATA_DIR / "backups").mkdir(exist_ok=True)
+(DATA_DIR / "import").mkdir(exist_ok=True)
 
 load_dotenv(BASE_DIR / ".env")
 
@@ -46,6 +47,7 @@ class Config:
     CSV_FILE = os.environ.get("CSV_FILE", "datos.csv")
     BACKUP_DIR = str(Path(DATA_DIR) / "backups")
     BACKUP_DIR_NAME = "backups"
+    IMPORT_DIR = str(Path(DATA_DIR) / "import")
     
     AUDIT_USER = os.environ.get("AUDIT_USER", "ui_user")
     ALLOWED_EXTENSIONS = {"csv"}
@@ -67,7 +69,7 @@ class Config:
 
 
 class DevelopmentConfig(Config):
-    DEBUG = True
+    DEBUG = False
     SQLALCHEMY_ECHO = False
 
 

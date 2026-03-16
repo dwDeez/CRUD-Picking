@@ -16,6 +16,8 @@ def create_app(config_name: str = "development") -> Flask:
     config_class = config_map.get(config_name.lower(), "DevelopmentConfig")
     app.config.from_object(f"app.config.{config_class}")
     
+    from app.models import Picking, PickingItem, Mercancia, PickingCSV, PickingItemCSV, MercanciaCSV, Recepcion, RecepcionItem
+    
     db.init_app(app)
     
     with app.app_context():

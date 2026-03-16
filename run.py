@@ -13,4 +13,4 @@ if __name__ == "__main__":
     print("   O simplemente presiona Ctrl+C y ejecuta: python -m app.dashboard")
     print("======================================\n")
     
-    app.run(debug=app.config.get("DEBUG", True), port=8050)
+    app.run(debug=False, port=8050, use_reloader=False)
